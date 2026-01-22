@@ -1385,7 +1385,7 @@ def merge_docs_to_target_size(
     return processed_chunks
 
 
-def save_docs_to_vector_db(
+async def save_docs_to_vector_db(
     request: Request,
     docs,
     collection_name,
@@ -1476,7 +1476,8 @@ def save_docs_to_vector_db(
                 chunk_overlap=request.app.state.config.CHUNK_OVERLAP,
                 add_start_index=True,
             )
-            docs = text_splitter.split_documents(docs)
+            # Run CPU-bound text splitting in thread pool to avoid blocking event loop
+            docs = await run_in_threadpool(text_splitter.split_documents, docs)
         elif request.app.state.config.TEXT_SPLITTER == "token":
             log.info(
                 f"Using token text splitter: {request.app.state.config.TIKTOKEN_ENCODING_NAME}"
@@ -1489,7 +1490,8 @@ def save_docs_to_vector_db(
                 chunk_overlap=request.app.state.config.CHUNK_OVERLAP,
                 add_start_index=True,
             )
-            docs = text_splitter.split_documents(docs)
+            # Run CPU-bound text splitting in thread pool to avoid blocking event loop
+            docs = await run_in_threadpool(text_splitter.split_documents, docs)
         else:
             raise ValueError(ERROR_MESSAGES.DEFAULT("Invalid text splitter"))
 
@@ -1554,13 +1556,11 @@ def save_docs_to_vector_db(
             enable_async=request.app.state.config.ENABLE_ASYNC_EMBEDDING,
         )
 
-        # Run async embedding in sync context
-        embeddings = asyncio.run(
-            embedding_function(
-                list(map(lambda x: x.replace("\n", " "), texts)),
-                prefix=RAG_EMBEDDING_CONTENT_PREFIX,
-                user=user,
-            )
+        # Await async embedding function (non-blocking)
+        embeddings = await embedding_function(
+            list(map(lambda x: x.replace("\n", " "), texts)),
+            prefix=RAG_EMBEDDING_CONTENT_PREFIX,
+            user=user,
         )
         log.info(f"embeddings generated {len(embeddings)} for {len(texts)} items")
 
@@ -1594,7 +1594,7 @@ class ProcessFileForm(BaseModel):
 
 
 @router.post("/process/file")
-def process_file(
+async def process_file(
     request: Request,
     form_data: ProcessFileForm,
     user=Depends(get_verified_user),
@@ -1763,7 +1763,7 @@ def process_file(
                 }
             else:
                 try:
-                    result = save_docs_to_vector_db(
+                    result = await save_docs_to_vector_db(
                         request,
                         docs=docs,
                         collection_name=collection_name,
@@ -1856,8 +1856,8 @@ async def process_text(
     text_content = form_data.content
     log.debug(f"text_content: {text_content}")
 
-    result = await run_in_threadpool(
-        save_docs_to_vector_db, request, docs, collection_name, user=user
+    result = await save_docs_to_vector_db(
+        request, docs, collection_name, user=user
     )
     if result:
         return {
@@ -1892,8 +1892,7 @@ async def process_web(
                 collection_name = calculate_sha256_string(form_data.url)[:63]
 
             if not request.app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
-                await run_in_threadpool(
-                    save_docs_to_vector_db,
+                await save_docs_to_vector_db(
                     request,
                     docs,
                     collection_name,
@@ -2370,8 +2369,7 @@ async def process_web_search(
             )
 
             try:
-                await run_in_threadpool(
-                    save_docs_to_vector_db,
+                await save_docs_to_vector_db(
                     request,
                     docs,
                     collection_name,
@@ -2698,8 +2696,7 @@ async def process_files_batch(
     # Save all documents in one batch
     if all_docs:
         try:
-            await run_in_threadpool(
-                save_docs_to_vector_db,
+            await save_docs_to_vector_db(
                 request,
                 all_docs,
                 collection_name,
