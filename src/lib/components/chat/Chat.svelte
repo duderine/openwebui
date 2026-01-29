@@ -1893,6 +1893,7 @@
 			model?.info?.params?.stream_response ??
 			$settings?.params?.stream_response ??
 			params?.stream_response ??
+			$config?.default_stream_response ??
 			true;
 
 		let messages = [
