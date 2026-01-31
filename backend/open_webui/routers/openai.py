@@ -1077,7 +1077,26 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
 
     body = await request.body()
 
+    payload = None
+    if body:
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            payload = None
+
+    model = payload.get("model") if isinstance(payload, dict) else None
+
     idx = 0
+    if model:
+        # First try to use an existing model mapping to avoid unnecessary
+        # calls to get_all_models on every proxy request.
+        model_entry = request.app.state.OPENAI_MODELS.get(model)
+        if not model_entry:
+            await get_all_models(request, user=user)
+            model_entry = request.app.state.OPENAI_MODELS.get(model)
+        if model_entry:
+            idx = model_entry["urlIdx"]
+
     url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
     key = request.app.state.config.OPENAI_API_KEYS[idx]
     api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
@@ -1106,10 +1125,18 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
 
             headers["api-version"] = api_version
 
-            payload = json.loads(body)
-            url, payload = convert_to_azure_payload(url, payload, api_version)
-            body = json.dumps(payload).encode()
+            if payload is None and body:
+                try:
+                    payload = json.loads(body)
+                except json.JSONDecodeError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid JSON payload",
+                    )
 
+            if payload is not None:
+                url, payload = convert_to_azure_payload(url, payload, api_version)
+                body = json.dumps(payload).encode()
             request_url = f"{url}/{path}?api-version={api_version}"
         else:
             request_url = f"{url}/{path}"
