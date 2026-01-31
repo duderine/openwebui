@@ -3,7 +3,8 @@
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
-	import { settings } from '$lib/stores';
+	import { settings, config } from '$lib/stores';
+	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
 
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
@@ -92,7 +93,7 @@
 <Modal size="lg" bind:show>
 	<div>
 		<div class=" flex justify-between dark:text-gray-300 px-4.5 pt-3 pb-2">
-			<div class=" text-lg font-medium self-center flex items-center">
+			<div class=" text-lg font-medium self-center flex items-center gap-2">
 				{#if citation?.source?.name}
 					{@const document = mergedDocuments?.[0]}
 					{#if document?.metadata?.file_id || document.source?.url?.includes('http')}
@@ -122,6 +123,9 @@
 				{:else}
 					{$i18n.t('Citation')}
 				{/if}
+				<span class="text-xs font-normal px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
+					{mergedDocuments.length} {mergedDocuments.length === 1 ? $i18n.t('snippet') : $i18n.t('snippets')}
+				</span>
 			</div>
 			<button
 				class="self-center"
@@ -215,6 +219,15 @@
 									srcdoc={document.document}
 									title={$i18n.t('Content')}
 								></iframe>
+							{:else if $config?.features?.enable_markdown_rendering}
+								<div class="mt-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-850 border border-gray-100 dark:border-gray-800">
+									<div class="prose prose-sm dark:prose-invert max-w-full prose-headings:text-base prose-h1:text-lg prose-h2:text-base prose-h3:text-sm prose-headings:mt-3 prose-headings:mb-2 prose-p:my-2 prose-p:leading-relaxed prose-pre:text-xs prose-li:my-1">
+										<Markdown
+											content={document.document.trim().replace(/\n\n+/g, '\n\n')}
+											id="citation-markdown-{documentIdx}"
+										/>
+									</div>
+								</div>
 							{:else}
 								<pre class="text-sm dark:text-gray-400 whitespace-pre-line">{document.document
 										.trim()
