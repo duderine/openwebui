@@ -246,12 +246,19 @@ async def import_models(
     try:
         data = form_data.models
         if isinstance(data, list):
+            # Batch-fetch existing models to avoid N+1 queries in loop
+            model_ids_to_import = [
+                model_data.get("id") for model_data in data
+                if model_data.get("id") and is_valid_model_id(model_data.get("id"))
+            ]
+            existing_models = Models.get_models_by_ids(model_ids_to_import, db=db)
+            existing_by_id = {model.id: model for model in existing_models}
+
             for model_data in data:
-                # Here, you can add logic to validate model_data if needed
                 model_id = model_data.get("id")
 
                 if model_id and is_valid_model_id(model_id):
-                    existing_model = Models.get_model_by_id(model_id, db=db)
+                    existing_model = existing_by_id.get(model_id)
                     if existing_model:
                         # Update existing model
                         model_data["meta"] = model_data.get("meta", {})
