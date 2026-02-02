@@ -346,6 +346,7 @@ def user_to_scim(user: UserModel, request: Request, db=None) -> SCIMUser:
             ).isoformat(),
             location=f"{request.base_url}api/v1/scim/v2/Users/{user.id}",
         ),
+        externalId=user.get_oauth_sub()
     )
 
 
@@ -496,9 +497,21 @@ async def get_users(
     if filter:
         # Simple filter parsing - supports userName eq "email"
         # In production, you'd want a more robust filter parser
-        if "userName eq" in filter:
+        # Note: filter via email is case sensitive per filter
+        #       specs
+        if "emails eq" in filter:
             email = filter.split('"')[1]
             user = Users.get_user_by_email(email, db=db)
+            users_list = [user] if user else []
+            total = 1 if user else 0
+        elif "emails eq_ci" in filter:
+            emails = filter.split('"')[1].split(",")
+            user = Users.get_user_by_email(email, caseSensitive=False, db=db)
+            users_list = [user] if user else []
+            total = 1 if user else 0  
+        elif "externalId eq" in filter:
+            externalId = filter.split('"')[1]
+            user = Users.get_user_by_oauth_sub(externalId, db=db)
             users_list = [user] if user else []
             total = 1 if user else 0
         else:
@@ -546,12 +559,25 @@ async def create_user(
     db: Session = Depends(get_session),
 ):
     """Create SCIM User"""
-    # Check if user already exists
-    existing_user = Users.get_user_by_email(user_data.userName, db=db)
+    # Check if user already exists via externalID (matched via OIDC Subject Identifier)
+    existing_user = Users.get_user_by_oauth_sub(user_data.externalId, db=db)
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"User with email {user_data.userName} already exists",
+            detail=f"User with externalId {user_data.externalId} already exists (aka internal user {existing_user.email})",
+        )
+
+    # Check if user already exists via email
+    primaryemail = None
+    for email in user_data.emails:
+        if email.primary:
+            primaryemail = email.value.lower() #Specs say that email provisioning is case insenstive (assuming all emails in DB is lowercase)
+            break
+    existing_user = Users.get_user_by_email(primaryemail, db=db)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"User with email {primaryemail} already exists",
         )
 
     # Create user

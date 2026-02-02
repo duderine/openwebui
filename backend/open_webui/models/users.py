@@ -103,6 +103,20 @@ class UserModel(BaseModel):
 
     oauth: Optional[dict] = None
 
+    def get_oauth_sub(self) -> Optional[str]:
+        """
+        Retrieves the 'sub' (subject) claim from the OIDC data within the user's OAuth information.
+        
+        :param self: The instance of the UserModel.
+        :return: The 'sub' claim as a string if available, otherwise None.
+        :rtype: str | None
+        """
+        if self.oauth is None:
+            return None
+        return self.oauth.get("oidc", {}).get("sub", None)
+
+
+
     last_active_at: int  # timestamp in epoch
     updated_at: int  # timestamp in epoch
     created_at: int  # timestamp in epoch
@@ -243,6 +257,7 @@ class UsersTable:
         email: str,
         profile_image_url: str = "/user.png",
         role: str = "pending",
+        username: Optional[str] = None,
         oauth: Optional[dict] = None,
         db: Optional[Session] = None,
     ) -> Optional[UserModel]:
@@ -257,6 +272,7 @@ class UsersTable:
                     "last_active_at": int(time.time()),
                     "created_at": int(time.time()),
                     "updated_at": int(time.time()),
+                    "username": username,
                     "oauth": oauth,
                 }
             )
@@ -295,11 +311,16 @@ class UsersTable:
             return None
 
     def get_user_by_email(
-        self, email: str, db: Optional[Session] = None
+        self, email: str, db: Optional[Session] = None, caseSensitive: bool = True
     ) -> Optional[UserModel]:
+        # Note that it is possible for capital letters to make it into the
+        # email attribute of the User Table via SCIM and OIDC
         try:
             with get_db_context(db) as db:
-                user = db.query(User).filter_by(email=email).first()
+                if caseSensitive:
+                    user = db.query(User).filter_by(email=email).first()
+                else:
+                    user = db.query(User).filter_by(email__iexact=email).first()
                 return UserModel.model_validate(user)
         except Exception:
             return None
